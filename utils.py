@@ -33,26 +33,26 @@ def generate_secret():
 def hash_string(input):
 	return hashlib.sha256(input.encode('UTF-8')).hexdigest()
 
-def aes_encrypt(key, iv, plaintext):
+def aes_encrypt(key, nonce, plaintext):
 	if isinstance(key, str): key = ascii_to_bytes(key)
-	if isinstance(iv, str): iv = ascii_to_bytes(iv)
+	if isinstance(nonce, str): nonce = ascii_to_bytes(nonce)
 
 	padder = padding.PKCS7(128).padder()
 	padded_plaintext = padder.update(plaintext.encode()) + padder.finalize()
 
-	cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+	cipher = Cipher(algorithms.AES(key), modes.CBC(nonce), backend=default_backend())
 
 	encryptor = cipher.encryptor()
 	ciphertext = encryptor.update(padded_plaintext) + encryptor.finalize()
 
 	return bytes_to_ascii(ciphertext)
 
-def aes_decrypt(key, iv, ciphertext):
+def aes_decrypt(key, nonce, ciphertext):
 	if isinstance(key, str): key = ascii_to_bytes(key)
-	if isinstance(iv, str): iv = ascii_to_bytes(iv)
+	if isinstance(nonce, str): nonce = ascii_to_bytes(nonce)
 	if isinstance(ciphertext, str): ciphertext = ascii_to_bytes(ciphertext)
 	
-	cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+	cipher = Cipher(algorithms.AES(key), modes.CBC(nonce), backend=default_backend())
 
 	decryptor = cipher.decryptor()
 	padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
@@ -62,6 +62,8 @@ def aes_decrypt(key, iv, ciphertext):
 
 	return plaintext.decode()
 
+def get_nonce(nonce):
+    return hash_string(str(nonce))[:32]
 
 # def XOR(m1: list, m2: list):
 # 	res = [0 for i in range(KEY_LENGHT)]

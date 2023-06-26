@@ -5,14 +5,14 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from utils import *
 import requests
-import binascii
 
 SERVER_URL = "127.0.0.1:5002"
 PRIVATE_KEY = ec.generate_private_key(ec.SECP384R1())
 PUBLIC_KEY = PRIVATE_KEY.public_key()
 communication_key = None
 session_id = None
-user_secret = None
+session_nonce = None
+session_username = None
 
 app = Flask(__name__)
     
@@ -27,6 +27,8 @@ def register():
         return render_template("register.html")
     elif request.method == "POST":
         if connect():
+            global session_id, session_nonce
+
             username = request.form.get("username")
             password = request.form.get("password")
             re_password = request.form.get("re_password")
@@ -39,56 +41,59 @@ def register():
                 error = "Passwords don't match"
                 return render_template("register.html",error=error)
             
-            iv = generate_iv()
-            encrypted_username = aes_encrypt(communication_key, iv, username)
+
+            encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), username)
             response = requests.post("http://{}/username-availability".format(SERVER_URL), json={"session_id": session_id,
-                                                                                                 "iv": iv,
                                                                                                  "username": encrypted_username})
             if not response.json()['success']:
                 error = "Username is already registered"
-                return render_template("register.html",error=error) 
+                return render_template("register.html",error=error)
+            session_nonce += 1
 
+            encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), username)
             hashed_password = hash_string(password)
-            encrypted_password = aes_encrypt(communication_key, iv, hashed_password)
+            encrypted_password = aes_encrypt(communication_key, get_nonce(session_nonce), hashed_password)
             response = requests.post("http://{}/register".format(SERVER_URL), json={"session_id": session_id,
-                                                                                    "iv": iv,
                                                                                     "username": encrypted_username,
                                                                                     "password": encrypted_password})
+            
+            # print(session_nonce)
             if not response.json()['success']:
                 error = "Error del servidor al registrar"
-                return render_template("register.html",error=error) 
+                return render_template("register.html",error=error)
+            session_nonce += 1
             return redirect("/")
 
 
 @app.route("/login", methods=["GET","POST"])
 def login():
-    global user_secret
     if request.method == "GET":
         return render_template("login.html")
     elif request.method == "POST":
         if connect():
+            global session_id, session_nonce, session_username
+
             username = request.form.get("username")
             password = request.form.get("password")
 
-            iv = generate_iv()
-            encrypted_username = aes_encrypt(communication_key, iv, username)
+            encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), username)
             hashed_password = hash_string(password)
-            encrypted_password = aes_encrypt(communication_key, iv, hashed_password)
+            encrypted_password = aes_encrypt(communication_key, get_nonce(session_nonce), hashed_password)
 
             response = requests.post("http://{}/login".format(SERVER_URL), json={"session_id": session_id,
-                                                                                "iv": iv,
                                                                                 "username": encrypted_username,
                                                                                 "password": encrypted_password})
             if not response.json()['success']:
                 error = "Error del servidor al iniciar sessión"
                 return render_template("login.html",error=error)
-            user_secret = aes_decrypt(communication_key, iv, response.json()['user_secret'])
-            print(user_secret)
+            session_username = username
+            session_nonce += 1
+            print(session_username)
             return redirect("/")
     
 
 def connect():
-    global communication_key, session_id
+    global communication_key, session_id, session_nonce
     if communication_key is not None and session_id is not None:
         return True
     
@@ -99,11 +104,16 @@ def connect():
         server_public_key = decode_key(response.json()['server_public_key'])
         shared_key = PRIVATE_KEY.exchange(ec.ECDH(), server_public_key)
 
-        communication_key = bytes_to_ascii(HKDF(algorithm=hashes.SHA256(),length=32,salt=None,info=b'',).derive(shared_key))
+        communication_key = bytes_to_ascii(HKDF(algorithm=hashes.SHA256(),length=32,salt=None,info=b'').derive(shared_key))
         session_id = response.json()['session_id']
+        session_nonce = 0
         print(communication_key, session_id)
         return True
     except:
         print("Ocurrió un error de conexión")
         return False
+    
+
+
+
 

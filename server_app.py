@@ -2,11 +2,9 @@ from flask import Flask, render_template, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from datetime import datetime, timedelta
 from utils import *
-import binascii
 
 app = Flask(__name__)
 
@@ -33,12 +31,13 @@ with app.app_context():
     db.create_all()
 
 
-# Una sesión es una 3-tupla que contiene:
-# [0]: El nombre del usuario (no puede repetirse)
+# Una sesión contiene:
+# [0]: El ID del usuario (no puede repetirse)
 # [1]: La llave del usuario
-# [2]: El tiempo de expiración del la llave
+# [2]: El nonce del usuario
+# [3]: El username activo (si está autenticado)
+# [4]: El tiempo de expiración del la llave
 active_sessions = []
-active_users = []
 
 PRIVATE_KEY = ec.generate_private_key(ec.SECP384R1())
 PUBLIC_KEY = PRIVATE_KEY.public_key()
@@ -56,6 +55,8 @@ def connect_secure():
 
     active_sessions.append({"session_id": session_id,
                             "key": communication_key,
+                            "nonce": 0,
+                            "username": None,
                             "expiration": datetime.now()+timedelta(minutes=SESSION_DURATION)})
 
     print(communication_key, session_id)
@@ -71,53 +72,44 @@ def home():
 @app.route("/username-availability", methods=["POST"])
 def username_availability():
     session_id = request.json.get('session_id')
-    key = get_key_from_session(session_id)
-    iv = request.json.get('iv')
+    key, nonce, username = get_data_from_session(session_id)
     
-    username = aes_decrypt(key, iv, request.json.get('username'))
+    username = aes_decrypt(key, get_nonce(nonce), request.json.get('username'))
     user = User.query.filter_by(username=username).first()
+
+    increment_nonce(session_id)
     return jsonify({"success": user is None})
 
 
 @app.route("/register", methods=["POST"])
 def register():
-    try:
-        session_id = request.json.get('session_id')
-        key = get_key_from_session(session_id)
-        iv = request.json.get('iv')
-
-        username = aes_decrypt(key, iv, request.json.get('username'))
-        password = aes_decrypt(key, iv, request.json.get('password'))
-        register_user(username, password)
-        success = True
-    except:
-        success = False
+    # try:
+    session_id = request.json.get('session_id')
+    key, nonce, _ = get_data_from_session(session_id)
+    username = aes_decrypt(key, get_nonce(nonce), request.json.get('username'))
+    password = aes_decrypt(key, get_nonce(nonce), request.json.get('password'))
+    # print(nonce)
+    register_user(username, password)
+    increment_nonce(session_id)
+    success = True
+    # except:
+    #     success = False
     return jsonify({"success": success})
 
 
-@app.route('/login', methods=['GET','POST'])
+@app.route('/login', methods=['POST'])
 def login():
-    if request.method == 'GET':
-        return render_template("login.html")
-    elif request.method == 'POST':
-        session_id = request.json.get('session_id')
-        key = get_key_from_session(session_id)
-        iv = request.json.get('iv')
+    session_id = request.json.get('session_id')
+    key, nonce, _ = get_data_from_session(session_id)
 
-        username = aes_decrypt(key, iv, request.json.get('username'))
-        password = aes_decrypt(key, iv, request.json.get('password'))
+    username = aes_decrypt(key, get_nonce(nonce), request.json.get('username'))
+    password = aes_decrypt(key, get_nonce(nonce), request.json.get('password'))
 
-        user = User.query.filter_by(username=username).first()
-
-        if user and user.password == password:
-            user_secret = generate_secret()
-            active_users.append({'secret': user_secret, 'username': username})
-
-            encrypted_user_secret = aes_encrypt(key, iv, user_secret)
-            return jsonify({'user_secret': encrypted_user_secret,
-                            'success': True})
-        else:
-            return jsonify({"success": False})
+    if autenticate_user(session_id, username, password):        
+        increment_nonce(session_id)
+        return jsonify({'success': True})
+    
+    return jsonify({"success": False})
 
 def register_user(username, password):
     db.session.add(User(username=username, password=password))
@@ -132,5 +124,18 @@ def search_active_sessions(session_id):
         if session['session_id'] == session_id:
             return session
 
-def get_key_from_session(session_id):
-    return search_active_sessions(session_id)['key']
+def get_data_from_session(session_id):
+    s = search_active_sessions(session_id)
+    return s['key'], s['nonce'], s['username']
+
+def increment_nonce(session_id):
+    s = search_active_sessions(session_id)
+    s['nonce'] += 1
+
+def autenticate_user(session_id, username, password):
+    user = User.query.filter_by(username=username).first()
+    if user and user.password == password:
+        s = search_active_sessions(session_id)
+        s['username'] = username
+        return True
+    return False
