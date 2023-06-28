@@ -19,7 +19,10 @@ app = Flask(__name__)
 
 @app.route("/", methods=["GET"])
 def home():
-    return render_template("home.html")
+    if session_username is None:
+        return render_template("home.html")
+    else:
+        redirect("/dashboard")
 
 @app.route("/register", methods=["GET","POST"])
 def register():
@@ -62,7 +65,7 @@ def register():
                 error = "Error del servidor al registrar"
                 return render_template("register.html",error=error)
             session_nonce += 1
-            return redirect("/")
+            return redirect("/dashboard")
 
 
 @app.route("/login", methods=["GET","POST"])
@@ -71,7 +74,34 @@ def login():
         return render_template("login.html")
     elif request.method == "POST":
         if connect():
-            global session_id, session_nonce, session_username
+            global communication_key, session_id, session_nonce, session_username
+
+            username = request.form.get("username")
+            password = request.form.get("password")
+
+            encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), username)
+            hashed_password = hash_string(password)
+            encrypted_password = aes_encrypt(communication_key, get_nonce(session_nonce), hashed_password)
+            print(session_nonce)
+
+            response = requests.post("http://{}/login".format(SERVER_URL), json={"session_id": session_id,
+                                                                                "username": encrypted_username,
+                                                                                "password": encrypted_password})
+            if not response.json()['success']:
+                error = "Error del servidor al iniciar sessión"
+                return render_template("login.html",error=error)
+            session_username = username
+            session_nonce += 1
+            print(session_username)
+            return redirect("/dashboard")
+
+@app.route("/dashboard", methods=['GET', 'POST'])
+def dashboard():
+    if request.method == "GET":
+        return render_template("dashboard.html")
+    elif request.method == "POST":
+        if connect():
+            global communication_key, session_id, session_nonce, session_username
 
             username = request.form.get("username")
             password = request.form.get("password")
@@ -90,7 +120,21 @@ def login():
             session_nonce += 1
             print(session_username)
             return redirect("/")
-    
+
+
+@app.route("/logout", methods=['GET'])
+def logout():
+    global communication_key, session_id, session_nonce, session_username
+    if session_username is not None:
+        encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), session_username)
+        response = requests.post("http://{}/logout".format(SERVER_URL), json={"session_id": session_id,
+                                                                            "username": encrypted_username})
+        if response.json()['success']:
+            communication_key = None
+            session_id = None
+            session_username = None
+            session_nonce = None
+    return redirect("/")
 
 def connect():
     global communication_key, session_id, session_nonce

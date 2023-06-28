@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Password Manager</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        table td, table th {
+            border: 1px solid black;
+            padding: 8px;
+        }
+        
+        button {
+            padding: 6px 12px;
+        }
+    </style>
+    <script>
+        function copyPassword(password) {
+            // Copy password to clipboard (you may need to modify this function based on browser compatibility)
+            navigator.clipboard.writeText(password);
+        }
+        
+        function showPassword(button) {
+            var row = button.parentNode.parentNode;
+            var passwordCell = row.querySelector('.password-cell');
+            var password = passwordCell.getAttribute('data-password');
+            passwordCell.innerHTML = '<input type="text" value="' + password + '" readonly>';
+            button.remove();
+            var hideButton = document.createElement('button');
+            hideButton.textContent = 'Hide';
+            hideButton.onclick = function() {
+                hidePassword(hideButton);
+            };
+            row.querySelector('.show-button-cell').appendChild(hideButton);
+        }
+        
+        function hidePassword(button) {
+            var row = button.parentNode.parentNode;
+            var passwordCell = row.querySelector('.password-cell');
+            var password = passwordCell.getAttribute('data-password');
+            passwordCell.innerHTML = '********';
+            button.remove();
+            var showButton = document.createElement('button');
+            showButton.textContent = 'Show';
+            showButton.onclick = function() {
+                showPassword(showButton);
+            };
+            row.querySelector('.show-button-cell').appendChild(showButton);
+        }
+
+
+        function deleteRow(row) {
+            row.parentNode.removeChild(row);
+        }
+        
+        function addRow() {
+            var name = document.getElementById('name').value;
+            var password = document.getElementById('password').value;
+
+            if (name && password) {
+                var table = document.getElementById('passwordTable');
+                var newRow = table.insertRow();
+
+                var nameCell = newRow.insertCell(0);
+                var passwordCell = newRow.insertCell(1);
+                var copyButtonCell = newRow.insertCell(2);
+                var showButtonCell = newRow.insertCell(3);
+                var deleteButtonCell = newRow.insertCell(4);
+
+                nameCell.innerHTML = name;
+                passwordCell.innerHTML = '********';
+                passwordCell.setAttribute('data-password', password);
+
+                var copyButton = document.createElement('button');
+                copyButton.textContent = 'Copy';
+                copyButton.addEventListener('click', function() {
+                copyPassword(password);
+                });
+                copyButtonCell.appendChild(copyButton);
+
+                var showButton = document.createElement('button');
+                showButton.textContent = 'Show';
+                showButton.addEventListener('click', function() {
+                showPassword(showButton);
+                });
+                showButtonCell.appendChild(showButton);
+
+                var deleteButton = document.createElement('button');
+                deleteButton.textContent = 'Delete';
+                deleteButton.addEventListener('click', function() {
+                deleteRow(newRow);
+                });
+                deleteButtonCell.appendChild(deleteButton);
+
+                document.getElementById('name').value = '';
+                document.getElementById('password').value = '';
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Password Manager</h1>
+    <a href="/logout">
+        <button>Logout</button>
+    </a>
+    
+    <h2>Add a new row:</h2>
+    <form onsubmit="event.preventDefault(); addRow();">
+        <label for="name">Name:</label>
+        <input type="text" id="name" required>
+        
+        <label for="password">Password:</label>
+        <input type="password" id="password" required>
+        
+        <button type="submit">Add Row</button>
+    </form>
+    
+    <h2>Passwords:</h2>
+    <table id="passwordTable">
+        <tr>
+            <th>Name</th>
+            <th>Password</th>
+            <th></th>
+            <th></th>
+            <th></th>
+        </tr>
+        <!-- Example row -->
+        <tr>
+            <td>John Doe</td>
+            <td class="password-cell" data-password="examplepassword123">********</td>
+            <td><button onclick="copyPassword('examplepassword123')">Copy</button></td>
+            <td class="show-button-cell"><button onclick="showPassword(this)">Show</button></td>
+            <td><button onclick="deleteRow(this.parentNode.parentNode)">Delete</button></td>
+          </tr>
+        <!-- More rows will be added dynamically -->
+    </table>
+</body>
+</html>

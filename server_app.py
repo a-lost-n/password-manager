@@ -26,6 +26,15 @@ class User(db.Model):
         self.username = username
         self.password = password
 
+class Password(db.Model):
+    username = db.Column(db.String(50), primary_key=True)
+    site = db.Column(db.String(128), primary_key=True)
+    secret = db.Column(db.String(128), nullable=False)
+
+    def __init__(self, username, site, secret):
+        self.username = username
+        self.site = site
+        self.secret = secret
 
 with app.app_context():
     db.create_all()
@@ -72,7 +81,7 @@ def home():
 @app.route("/username-availability", methods=["POST"])
 def username_availability():
     session_id = request.json.get('session_id')
-    key, nonce, username = get_data_from_session(session_id)
+    key, nonce, _ = get_data_from_session(session_id)
     
     username = aes_decrypt(key, get_nonce(nonce), request.json.get('username'))
     user = User.query.filter_by(username=username).first()
@@ -88,7 +97,6 @@ def register():
     key, nonce, _ = get_data_from_session(session_id)
     username = aes_decrypt(key, get_nonce(nonce), request.json.get('username'))
     password = aes_decrypt(key, get_nonce(nonce), request.json.get('password'))
-    # print(nonce)
     register_user(username, password)
     increment_nonce(session_id)
     success = True
@@ -101,18 +109,49 @@ def register():
 def login():
     session_id = request.json.get('session_id')
     key, nonce, _ = get_data_from_session(session_id)
-
+    print(nonce)
     username = aes_decrypt(key, get_nonce(nonce), request.json.get('username'))
-    password = aes_decrypt(key, get_nonce(nonce), request.json.get('password'))
+    password = aes_decrypt(key, get_nonce(nonce), request.json.get('password'))  
 
-    if autenticate_user(session_id, username, password):        
-        increment_nonce(session_id)
+    if autenticate_user(session_id, username, password): 
+        increment_nonce(session_id)     
         return jsonify({'success': True})
     
     return jsonify({"success": False})
 
+
+@app.route('/get-secrets', methods=['POST'])
+def get_passwords():
+    session_id = request.json.get('session_id')
+    key, nonce, username = get_data_from_session(session_id)
+    if username is not None:
+        passwords = Password.query.filter_by(username=username).all()
+        return jsonify({'success': True,
+                        'passwords': passwords})
+    return jsonify({'success': False})
+
+
+@app.route("/logout", methods=['POST'])
+def logout():
+    session_id = request.json.get('session_id')
+    key, nonce, username = get_data_from_session(session_id)
+
+    target_username = aes_decrypt(key, get_nonce(nonce), request.json.get('username'))
+    if username == target_username:
+        delete_session(session_id)
+        return jsonify({'success': True})
+    return jsonify({'success': False})
+
 def register_user(username, password):
     db.session.add(User(username=username, password=password))
+    db.session.commit()
+
+def login_user(session_id, username):
+    session = search_active_sessions(session_id)
+    session['username'] = username
+
+def add_password(username, site, secret):
+    db.session.add(Password(username=username, site=site, secret=secret))
     db.session.commit()
 
 # Temporal
@@ -127,6 +166,13 @@ def search_active_sessions(session_id):
 def get_data_from_session(session_id):
     s = search_active_sessions(session_id)
     return s['key'], s['nonce'], s['username']
+
+def delete_session(session_id):
+    for i in range(len(active_sessions)):
+        if active_sessions[i]['session_id'] == session_id:
+            del active_sessions[i]
+            return
+            
 
 def increment_nonce(session_id):
     s = search_active_sessions(session_id)
