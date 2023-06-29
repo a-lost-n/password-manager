@@ -9,7 +9,7 @@ import requests
 SERVER_URL = "127.0.0.1:5002"
 PRIVATE_KEY = ec.generate_private_key(ec.SECP384R1())
 PUBLIC_KEY = PRIVATE_KEY.public_key()
-communication_key = None
+session_key = None
 session_id = None
 session_nonce = None
 session_username = None
@@ -45,7 +45,7 @@ def register():
                 return render_template("register.html",error=error)
             
 
-            encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), username)
+            encrypted_username = aes_encrypt(session_key, session_nonce, username)
             response = requests.post("http://{}/username-availability".format(SERVER_URL), json={"session_id": session_id,
                                                                                                  "username": encrypted_username})
             if not response.json()['success']:
@@ -53,9 +53,9 @@ def register():
                 return render_template("register.html",error=error)
             session_nonce += 1
 
-            encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), username)
+            encrypted_username = aes_encrypt(session_key, session_nonce, username)
             hashed_password = hash_string(password)
-            encrypted_password = aes_encrypt(communication_key, get_nonce(session_nonce), hashed_password)
+            encrypted_password = aes_encrypt(session_key, session_nonce, hashed_password)
             response = requests.post("http://{}/register".format(SERVER_URL), json={"session_id": session_id,
                                                                                     "username": encrypted_username,
                                                                                     "password": encrypted_password})
@@ -74,15 +74,15 @@ def login():
         return render_template("login.html")
     elif request.method == "POST":
         if connect():
-            global communication_key, session_id, session_nonce, session_username
+            global session_key, session_id, session_nonce, session_username
 
             username = request.form.get("username")
             password = request.form.get("password")
 
-            encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), username)
+            encrypted_username = aes_encrypt(session_key, session_nonce, username)
             hashed_password = hash_string(password)
-            encrypted_password = aes_encrypt(communication_key, get_nonce(session_nonce), hashed_password)
-            print(session_nonce)
+            encrypted_password = aes_encrypt(session_key, session_nonce, hashed_password)
+            # print(session_nonce)
 
             response = requests.post("http://{}/login".format(SERVER_URL), json={"session_id": session_id,
                                                                                 "username": encrypted_username,
@@ -92,53 +92,77 @@ def login():
                 return render_template("login.html",error=error)
             session_username = username
             session_nonce += 1
-            print(session_username)
+            # print(session_username)
             return redirect("/dashboard")
+        return redirect('/')
 
-@app.route("/dashboard", methods=['GET', 'POST'])
+@app.route("/dashboard", methods=['GET'])
 def dashboard():
-    if request.method == "GET":
-        return render_template("dashboard.html")
-    elif request.method == "POST":
-        if connect():
-            global communication_key, session_id, session_nonce, session_username
+    if connect() and loggedIn():
+        global session_key, session_id, session_nonce, session_username
 
-            username = request.form.get("username")
-            password = request.form.get("password")
-
-            encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), username)
-            hashed_password = hash_string(password)
-            encrypted_password = aes_encrypt(communication_key, get_nonce(session_nonce), hashed_password)
-
-            response = requests.post("http://{}/login".format(SERVER_URL), json={"session_id": session_id,
-                                                                                "username": encrypted_username,
-                                                                                "password": encrypted_password})
-            if not response.json()['success']:
-                error = "Error del servidor al iniciar sessión"
-                return render_template("login.html",error=error)
-            session_username = username
+        response = requests.post("http://{}/get_secrets".format(SERVER_URL), json={"session_id": session_id})
+        if response.json()['success']:
+            sites = [aes_decrypt(session_key, session_nonce, site) for site in response.json()['sites']]
+            secrets = [aes_decrypt(session_key, session_nonce, secret) for secret in response.json()['secrets']]
             session_nonce += 1
-            print(session_username)
-            return redirect("/")
+            return render_template("dashboard.html", rows=zip(sites, secrets))
+
+    return redirect('/logout')
+
+@app.route("/add", methods=['POST'])
+def add_secret():
+    if connect() and loggedIn():
+        global session_key, session_id, session_nonce, session_username
+
+        site = request.form.get("site")
+        secret = request.form.get("secret")
+
+        print(site, secret)
+
+        encrypted_site = aes_encrypt(session_key, session_nonce, site)
+        encrypted_secret = aes_encrypt(session_key, session_nonce, secret)
+
+        response = requests.post("http://{}/add".format(SERVER_URL), json={"session_id": session_id,
+                                                                           "site": encrypted_site,
+                                                                           "secret": encrypted_secret})
+        if response.json()['success']:
+            session_nonce += 1
+            return redirect("/dashboard")
+        
+    return redirect('/logout')
+
+@app.route("/delete/<site>", methods=['GET'])
+def delete_site(site):
+    if connect() and loggedIn():
+        global session_key, session_id, session_nonce, session_username
+
+        encrypted_site = aes_encrypt(session_key, session_nonce, site)
+
+        response = requests.post("http://{}/delete".format(SERVER_URL), json={"session_id": session_id,
+                                                                              "site": encrypted_site})
+        if response.json()['success']:
+            session_nonce += 1
+            return redirect("/dashboard")
 
 
 @app.route("/logout", methods=['GET'])
 def logout():
-    global communication_key, session_id, session_nonce, session_username
+    global session_key, session_id, session_nonce, session_username
     if session_username is not None:
-        encrypted_username = aes_encrypt(communication_key, get_nonce(session_nonce), session_username)
+        encrypted_username = aes_encrypt(session_key, session_nonce, session_username)
         response = requests.post("http://{}/logout".format(SERVER_URL), json={"session_id": session_id,
                                                                             "username": encrypted_username})
         if response.json()['success']:
-            communication_key = None
+            session_key = None
             session_id = None
             session_username = None
             session_nonce = None
     return redirect("/")
 
 def connect():
-    global communication_key, session_id, session_nonce
-    if communication_key is not None and session_id is not None:
+    global session_key, session_id, session_nonce
+    if session_key is not None and session_id is not None:
         return True
     
     try:
@@ -148,14 +172,18 @@ def connect():
         server_public_key = decode_key(response.json()['server_public_key'])
         shared_key = PRIVATE_KEY.exchange(ec.ECDH(), server_public_key)
 
-        communication_key = bytes_to_ascii(HKDF(algorithm=hashes.SHA256(),length=32,salt=None,info=b'').derive(shared_key))
+        session_key = bytes_to_ascii(HKDF(algorithm=hashes.SHA256(),length=32,salt=None,info=b'').derive(shared_key))
         session_id = response.json()['session_id']
         session_nonce = 0
-        print(communication_key, session_id)
+        print(session_key, session_id)
         return True
     except:
         print("Ocurrió un error de conexión")
         return False
+    
+def loggedIn():
+    global session_username
+    return session_username is not None
     
 
 

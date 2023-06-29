@@ -35,6 +35,7 @@ def hash_string(input):
 
 def aes_encrypt(key, nonce, plaintext):
 	if isinstance(key, str): key = ascii_to_bytes(key)
+	if isinstance(nonce, int): nonce = get_nonce(nonce)
 	if isinstance(nonce, str): nonce = ascii_to_bytes(nonce)
 
 	padder = padding.PKCS7(128).padder()
@@ -49,6 +50,7 @@ def aes_encrypt(key, nonce, plaintext):
 
 def aes_decrypt(key, nonce, ciphertext):
 	if isinstance(key, str): key = ascii_to_bytes(key)
+	if isinstance(nonce, int): nonce = get_nonce(nonce)
 	if isinstance(nonce, str): nonce = ascii_to_bytes(nonce)
 	if isinstance(ciphertext, str): ciphertext = ascii_to_bytes(ciphertext)
 	
