@@ -47,7 +47,7 @@ with app.app_context():
 # [3]: El username activo (si está autenticado)
 # [4]: El tiempo de expiración del la llave
 active_sessions = []
-
+SESSION_DURATION = 1
 PRIVATE_KEY = ec.generate_private_key(ec.SECP384R1())
 PUBLIC_KEY = PRIVATE_KEY.public_key()
 
@@ -92,24 +92,24 @@ def username_availability():
 
 @app.route("/register", methods=["POST"])
 def register():
-    # try:
     session_id = request.json.get('session_id')
     key, nonce, _ = get_data_from_session(session_id)
+
     username = aes_decrypt(key, nonce, request.json.get('username'))
     password = aes_decrypt(key, nonce, request.json.get('password'))
     register_user(username, password)
-    increment_nonce(session_id)
-    success = True
-    # except:
-    #     success = False
-    return jsonify({"success": success})
+    if autenticate_user(session_id, username, password): 
+        increment_nonce(session_id)     
+        return jsonify({'success': True})
+    
+    return jsonify({"success": False})
 
 
 @app.route('/login', methods=['POST'])
 def login():
     session_id = request.json.get('session_id')
     key, nonce, _ = get_data_from_session(session_id)
-    print(nonce)
+
     username = aes_decrypt(key, nonce, request.json.get('username'))
     password = aes_decrypt(key, nonce, request.json.get('password'))  
 
@@ -144,7 +144,10 @@ def add_secret():
     site = aes_decrypt(key, nonce, request.json.get('site'))
     secret = aes_decrypt(key, nonce, request.json.get('secret'))
 
-    add_password(username, site, secret)
+    try:
+        add_password(username, site, secret)
+    except:
+        return jsonify({'success': False})
     increment_nonce(session_id)
     return jsonify({'success': True})
 
@@ -169,6 +172,17 @@ def logout():
         delete_session(session_id)
         return jsonify({'success': True})
     return jsonify({'success': False})
+
+
+@app.route("/check_validity", methods=['POST'])
+def check_validity():
+    session_id = request.json.get('session_id')
+    session = search_active_sessions(session_id)
+    if session['expiration'] <= datetime.now():
+        delete_session(session_id)
+        return jsonify({'success': False})
+    return jsonify({'success': True})
+
 
 def register_user(username, password):
     db.session.add(User(username=username, password=password))
