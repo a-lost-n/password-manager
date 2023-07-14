@@ -18,28 +18,45 @@
         }
     </style>
     <script>
-        function copyPassword(password) {
-            navigator.clipboard.writeText(password);
+
+        function fetchPassword(site) {
+        return  fetch(`secret/${site}`)
+            .then(response => response.json())
+            .then(data => {
+            return data.secret;
+            })
+            .catch(error => {
+            console.error('Error:', error);
+            window.location.href = '/logout';
+            });
+        }
+
+        function copyPassword(site) {
+            fetchPassword(site)
+                .then(secret => navigator.clipboard.writeText(secret));
         }
         
-        function showPassword(button) {
+        function showPassword(button, site) {
             var row = button.parentNode.parentNode;
             var passwordCell = row.querySelector('.password-cell');
-            var password = passwordCell.getAttribute('data-password');
-            passwordCell.innerHTML = '<input type="text" value="' + password + '" readonly>';
-            button.remove();
-            var hideButton = document.createElement('button');
-            hideButton.textContent = 'Hide';
-            hideButton.onclick = function() {
-                hidePassword(hideButton);
-            };
-            row.querySelector('.show-button-cell').appendChild(hideButton);
+            fetchPassword(site) // Replace 'site' with the appropriate argument for the site name
+                .then(password => {
+                passwordCell.innerHTML = '<input type="text" value="' + password + '" readonly>';
+                button.remove();
+
+                var hideButton = document.createElement('button');
+                hideButton.textContent = 'Hide';
+                hideButton.onclick = function() {
+                    hidePassword(hideButton);
+                };
+
+                row.querySelector('.show-button-cell').appendChild(hideButton);
+            });
         }
         
         function hidePassword(button) {
             var row = button.parentNode.parentNode;
             var passwordCell = row.querySelector('.password-cell');
-            var password = passwordCell.getAttribute('data-password');
             passwordCell.innerHTML = '********';
             button.remove();
             var showButton = document.createElement('button');
@@ -66,7 +83,7 @@
     
     <h2>Add a new row:</h2>
     <form action="/add" method="post">
-        <label for="site">Name:</label>
+        <label for="site">Site:</label>
         <input type="text" id="site" name="site" required>
         
         <label for="secret">Password:</label>
@@ -84,12 +101,12 @@
             <th></th>
             <th></th>
         </tr>
-        {% for site, secret in rows %}
+        {% for site in rows %}
         <tr>
           <td>{{ site }}</td>
-          <td class="password-cell" data-password="{{ secret }}">********</td>
-          <td><button onclick="copyPassword('{{ secret }}')">Copy</button></td>
-          <td class="show-button-cell"><button onclick="showPassword(this)">Show</button></td>
+          <td class="password-cell" data-password="">********</td>
+          <td><button onclick="copyPassword('{{ site }}')">Copy</button></td>
+          <td class="show-button-cell"><button onclick="showPassword(this, '{{ site }}')">Show</button></td>
           <td><a href="/delete/{{ site }}"><button>Delete</button></td></a>
         </tr>
         {% endfor %}

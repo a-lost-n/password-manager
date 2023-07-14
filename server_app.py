@@ -30,11 +30,13 @@ class Password(db.Model):
     username = db.Column(db.String(50), primary_key=True)
     site = db.Column(db.String(128), primary_key=True)
     secret = db.Column(db.String(128), nullable=False)
+    iv = db.Column(db.String(32), nullable=False)
 
-    def __init__(self, username, site, secret):
+    def __init__(self, username, site, secret, iv):
         self.username = username
         self.site = site
         self.secret = secret
+        self.iv = iv
 
 with app.app_context():
     db.create_all()
@@ -120,21 +122,33 @@ def login():
     return jsonify({"success": False})
 
 
-@app.route('/get_secrets', methods=['POST'])
-def get_passwords():
+@app.route('/get_sites', methods=['POST'])
+def get_sites():
     session_id = request.json.get('session_id')
     key, nonce, username = get_data_from_session(session_id)
     if username is not None:
         passwords = Password.query.filter_by(username=username).all()
-        # print(passwords[0].site, passwords[0].secret)
         encrypted_sites = [aes_encrypt(key, nonce, password.site) for password in passwords]
-        encrypted_secrets = [aes_encrypt(key, nonce, password.secret) for password in passwords]
         increment_nonce(session_id)
         return jsonify({'success': True,
-                        'sites': encrypted_sites,
-                        'secrets': encrypted_secrets})
+                        'sites': encrypted_sites})
     return jsonify({'success': False})
 
+@app.route('/secret', methods=['POST'])
+def get_secret():
+    session_id = request.json.get('session_id')
+    key, nonce, username = get_data_from_session(session_id)
+
+    site = aes_decrypt(key, nonce, request.json.get('site'))
+    if username is not None:
+        password = Password.query.filter_by(username=username, site=site).first()
+        encrypted_secret = aes_encrypt(key, nonce, password.secret)
+        encrypted_iv = aes_encrypt(key, nonce, password.iv)
+        increment_nonce(session_id)
+        return jsonify({'success': True,
+                        'secret': encrypted_secret,
+                        'iv': encrypted_iv})
+    return jsonify({'success': False})
 
 @app.route("/add", methods=['POST'])
 def add_secret():
@@ -143,9 +157,10 @@ def add_secret():
 
     site = aes_decrypt(key, nonce, request.json.get('site'))
     secret = aes_decrypt(key, nonce, request.json.get('secret'))
+    iv = aes_decrypt(key, nonce, request.json.get('iv'))
 
     try:
-        add_password(username, site, secret)
+        add_password(username, site, secret, iv)
     except:
         return jsonify({'success': False})
     increment_nonce(session_id)
@@ -192,8 +207,8 @@ def login_user(session_id, username):
     session = search_active_sessions(session_id)
     session['username'] = username
 
-def add_password(username, site, secret):
-    db.session.add(Password(username=username, site=site, secret=secret))
+def add_password(username, site, secret, iv):
+    db.session.add(Password(username=username, site=site, secret=secret, iv=iv))
     db.session.commit()
 
 def delete_password(username, site):

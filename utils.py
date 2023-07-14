@@ -31,6 +31,9 @@ def generate_secret():
 def hash_string(input):
 	return hashlib.sha256(input.encode('UTF-8')).hexdigest()
 
+def hash_key(input):
+	return hashlib.sha512(input.encode('UTF-8')).hexdigest()[:64]
+
 def aes_encrypt(key, nonce, plaintext):
 	if isinstance(key, str): key = ascii_to_bytes(key)
 	if isinstance(nonce, int): nonce = get_nonce(nonce)

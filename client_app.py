@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, jsonify
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -12,6 +12,7 @@ session_key = None
 session_id = None
 session_nonce = None
 session_username = None
+session_encrypt = None
 
 app = Flask(__name__)
     
@@ -29,7 +30,7 @@ def register():
         return render_template("register.html")
     elif request.method == "POST":
         if connect():
-            global session_nonce, session_username
+            global session_nonce, session_username, session_encrypt
 
             username = request.form.get("username")
             password = request.form.get("password")
@@ -64,6 +65,7 @@ def register():
                 return render_template("register.html",error=error)
             session_username = username
             session_nonce += 1
+            session_encrypt = hash_key(password)
             return redirect("/dashboard")
     return redirect('/')
 
@@ -74,13 +76,13 @@ def login():
         return render_template("login.html")
     elif request.method == "POST":
         if connect():
-            global session_nonce, session_username
+            global session_nonce, session_username, session_encrypt
 
             username = request.form.get("username")
             password = request.form.get("password")
+            hashed_password = hash_string(password)
 
             encrypted_username = aes_encrypt(session_key, session_nonce, username)
-            hashed_password = hash_string(password)
             encrypted_password = aes_encrypt(session_key, session_nonce, hashed_password)
 
             response = requests.post("http://{}/login".format(SERVER_URL), json={"session_id": session_id,
@@ -91,39 +93,44 @@ def login():
                 return render_template("login.html",error=error)
             session_username = username
             session_nonce += 1
+            session_encrypt = hash_key(password)
             return redirect("/dashboard")
         return redirect('/')
 
 @app.route("/dashboard", methods=['GET'])
 def dashboard():
     if connect() and loggedIn():
-        global session_id, session_nonce, session_username
+        global session_id, session_nonce, session_username, session_encrypt
 
-        response = requests.post("http://{}/get_secrets".format(SERVER_URL), json={"session_id": session_id})
+        response = requests.post("http://{}/get_sites".format(SERVER_URL), json={"session_id": session_id})
         if response.json()['success']:
             sites = [aes_decrypt(session_key, session_nonce, site) for site in response.json()['sites']]
-            secrets = [aes_decrypt(session_key, session_nonce, secret) for secret in response.json()['secrets']]
             session_nonce += 1
-            return render_template("dashboard.html", rows=zip(sites, secrets))
+            return render_template("dashboard.html", rows=sites, server=SERVER_URL)
 
     return redirect('/logout')
 
 @app.route("/add", methods=['POST'])
 def add_secret():
     if connect() and loggedIn():
-        global session_id, session_nonce, session_username
+        global session_id, session_nonce, session_username, session_encrypt
+
+        iv = generate_iv()
 
         site = request.form.get("site")
         secret = request.form.get("secret")
+        en_secret = aes_encrypt(session_encrypt, iv, secret)
 
         print(site, secret)
 
         encrypted_site = aes_encrypt(session_key, session_nonce, site)
-        encrypted_secret = aes_encrypt(session_key, session_nonce, secret)
+        encrypted_secret = aes_encrypt(session_key, session_nonce, en_secret)
+        encrypted_iv = aes_encrypt(session_key, session_nonce, iv)
 
         response = requests.post("http://{}/add".format(SERVER_URL), json={"session_id": session_id,
                                                                            "site": encrypted_site,
-                                                                           "secret": encrypted_secret})
+                                                                           "secret": encrypted_secret,
+                                                                           "iv": encrypted_iv})
         if response.json()['success']:
             session_nonce += 1
             return redirect("/dashboard")
@@ -132,6 +139,24 @@ def add_secret():
             return redirect("/dashboard", error=error)
         
     return redirect('/logout')
+
+@app.route("/secret/<site>", methods=['GET'])
+def get_secret(site):
+    if connect() and loggedIn():
+        global session_nonce
+
+        encrypted_site = aes_encrypt(session_key, session_nonce, site)
+
+        response = requests.post("http://{}/secret".format(SERVER_URL), json={"session_id": session_id,
+                                                                              "site": encrypted_site})
+        if response.json()['success']:
+            iv = aes_decrypt(session_key, session_nonce, response.json()['iv'])
+            en_secret = aes_decrypt(session_key, session_nonce, response.json()['secret'])
+            secret = aes_decrypt(session_encrypt, iv, en_secret)
+            session_nonce += 1
+            # print(secret)
+            return jsonify({'secret': secret})
+    return redirect("/logout")
 
 @app.route("/delete/<site>", methods=['GET'])
 def delete_site(site):
@@ -151,7 +176,7 @@ def delete_site(site):
 
 @app.route("/logout", methods=['GET'])
 def logout():
-    global session_key, session_id, session_nonce, session_username
+    global session_key, session_id, session_nonce, session_username, session_encrypt
     message = "Session expired!"
     if session_username is not None:
         encrypted_username = aes_encrypt(session_key, session_nonce, session_username)
@@ -162,6 +187,7 @@ def logout():
             session_id = None
             session_username = None
             session_nonce = None
+            session_encrypt = None
 
         message = "Successful Logout"
     return render_template("disconnect.html", message=message)
@@ -169,7 +195,7 @@ def logout():
 
 
 def connect():
-    global session_key, session_id, session_nonce, session_username
+    global session_key, session_id, session_nonce, session_username, session_encrypt
     if session_key is not None and session_id is not None:
         response = requests.post("http://{}/check_validity".format(SERVER_URL), json={"session_id": session_id})
         if not response.json()['success']:
@@ -177,6 +203,7 @@ def connect():
             session_id = None
             session_nonce = None
             session_username = None
+            session_encrypt = None
         return response.json()['success']
     
     try:
